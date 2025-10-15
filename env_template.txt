@@ -1,0 +1,44 @@
+# ==================== نموذج ملف .env ====================
+# انسخ محتوى هذا الملف إلى ملف جديد باسم .env
+# ثم عدّل القيم حسب احتياجك
+
+# ==================== Telegram Bot Configuration ====================
+BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+BOT_USERNAME=UniversityAssignmentsBot
+BOT_NAME=بوت الواجبات الجامعي
+
+# ==================== Owner Configuration ====================
+OWNER_TELEGRAM_ID=123456789
+OWNER_NAME=المسؤول
+
+# ==================== Database Configuration ====================
+DB_PATH=university_bot.db
+
+# ==================== Section Configuration ====================
+MAX_STUDENTS_PER_SECTION=50
+
+# ==================== Assignment Configuration ====================
+ASSIGNMENT_EDIT_DURATION_HOURS=24
+
+# ==================== Timezone Configuration ====================
+TIMEZONE=Asia/Baghdad
+
+# ==================== Logging Configuration ====================
+LOG_LEVEL=INFO
+LOG_FILE=bot.log
+MAX_LOG_FILE_SIZE_MB=10
+LOG_BACKUP_COUNT=5
+
+# ==================== Notification Configuration ====================
+NOTIFICATION_DELAY_SECONDS=0.05
+NOTIFICATION_RETRY_ATTEMPTS=3
+NOTIFICATION_BATCH_SIZE=30
+
+# ==================== Performance Configuration ====================
+DB_TIMEOUT_SECONDS=10
+
+# ==================== Development Configuration ====================
+DEBUG_MODE=False
+SHOW_SQL_QUERIES=False
+AUTO_TESTING=False
+
