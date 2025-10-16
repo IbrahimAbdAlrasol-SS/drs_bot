@@ -54,10 +54,10 @@ Successfully installed pyTelegramBotAPI-4.14.0 python-dotenv-1.0.0 pytz-2023.3
 
 ```bash
 # في Windows
-copy env_template.txt .env
+copy env_template.env .env
 
 # في Linux/Mac
-cp env_template.txt .env
+cp env_template.env .env
 ```
 
 **افتح ملف `.env` وعدّل:**

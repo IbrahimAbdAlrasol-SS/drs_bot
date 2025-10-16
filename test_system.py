@@ -12,6 +12,14 @@ from datetime import datetime, timedelta
 # إضافة المجلد الحالي للمسار
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# حل مشكلة encoding في Windows
+if sys.platform.startswith('win'):
+    import codecs
+    if sys.stdout.encoding != 'utf-8':
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+    if sys.stderr.encoding != 'utf-8':
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+
 from config import Config
 from database import (
     UserDatabase, SectionDatabase, StudentDatabase,

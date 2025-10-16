@@ -124,7 +124,10 @@ class DateTimeHelper:
             '2025-10-20 الساعة 23:59'
         """
         if include_time:
-            return dt.strftime('%Y-%m-%d الساعة %H:%M')
+            # تجنب مشاكل encoding باستخدام format بدلاً من strftime
+            date_part = dt.strftime('%Y-%m-%d')
+            time_part = dt.strftime('%H:%M')
+            return f'{date_part} الساعة {time_part}'
         else:
             return dt.strftime('%Y-%m-%d')
     

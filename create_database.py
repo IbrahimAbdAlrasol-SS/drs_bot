@@ -5,10 +5,19 @@
 يقوم بإنشاء جميع الجداول والبيانات الأولية المطلوبة
 """
 
+import sys
 import sqlite3
 import logging
 from datetime import datetime
 from typing import Optional
+
+# حل مشكلة encoding في Windows
+if sys.platform.startswith('win'):
+    import codecs
+    if sys.stdout.encoding != 'utf-8':
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+    if sys.stderr.encoding != 'utf-8':
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
 
 # إعداد نظام السجلات
 logging.basicConfig(
@@ -63,7 +72,7 @@ class DatabaseCreator:
             logger.info("📝 إنشاء جدول المستخدمين...")
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
-                    user_id INTEGER PRIMARY KEY,
+                    user_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     telegram_id INTEGER UNIQUE NOT NULL,
                     username TEXT,
                     full_name TEXT NOT NULL,
@@ -144,6 +153,22 @@ class DatabaseCreator:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            
+            # ==================== جدول ربط المواد بالمراحل ====================
+            logger.info("📝 إنشاء جدول ربط المواد بالمراحل...")
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS subjects_stages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    subject_id INTEGER NOT NULL,
+                    stage_id INTEGER NOT NULL,
+                    is_active INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (subject_id) REFERENCES subjects(subject_id) ON DELETE CASCADE,
+                    FOREIGN KEY (stage_id) REFERENCES academic_levels(level_id) ON DELETE CASCADE,
+                    UNIQUE(subject_id, stage_id)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_subject_stage ON subjects_stages(subject_id, stage_id)")
             
             # ==================== جدول الواجبات ====================
             logger.info("📝 إنشاء جدول الواجبات...")
@@ -287,6 +312,21 @@ class DatabaseCreator:
                 INSERT OR IGNORE INTO subjects (subject_name, description)
                 VALUES (?, ?)
             """, subjects)
+            
+            # ==================== ربط المواد بالمراحل ====================
+            logger.info("📝 ربط المواد بالمراحل الدراسية...")
+            subjects_stages_data = [
+                (1, 1),  # برمجة 1 - المرحلة الأولى
+                (2, 2),  # قواعد البيانات - المرحلة الثانية
+                (3, 1),  # الرياضيات - المرحلة الأولى
+                (4, 3),  # الخوارزميات - المرحلة الثالثة
+                (5, 4),  # هندسة البرمجيات - المرحلة الرابعة
+            ]
+            
+            cursor.executemany("""
+                INSERT OR IGNORE INTO subjects_stages (subject_id, stage_id)
+                VALUES (?, ?)
+            """, subjects_stages_data)
             
             # ==================== إضافة إعدادات البوت ====================
             logger.info("📝 إضافة إعدادات البوت...")

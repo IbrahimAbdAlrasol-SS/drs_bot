@@ -5,11 +5,20 @@
 يحتوي على جميع handlers والمنطق الأساسي للبوت
 """
 
+import sys
 import logging
 import time
 import asyncio
 from datetime import datetime
 from typing import Optional, Dict, Any
+
+# حل مشكلة encoding في Windows
+if sys.platform.startswith('win'):
+    import codecs
+    if sys.stdout.encoding != 'utf-8':
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+    if sys.stderr.encoding != 'utf-8':
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
 
 from telebot import TeleBot, types
 from telebot.handler_backends import State, StatesGroup

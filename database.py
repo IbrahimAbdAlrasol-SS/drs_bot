@@ -1812,6 +1812,42 @@ def get_subjects() -> List[Dict[str, Any]]:
         return []
 
 
+def get_subjects_for_stage(stage_id: int) -> List[Dict[str, Any]]:
+    """
+    الحصول على قائمة المواد لمرحلة معينة
+    
+    Args:
+        stage_id: معرف المرحلة
+    
+    Returns:
+        قائمة من القواميس تحتوي على المواد
+    
+    مثال:
+        >>> subjects = get_subjects_for_stage(1)
+        >>> for subject in subjects:
+        ...     print(subject['subject_name'])
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT s.*
+                FROM subjects s
+                JOIN subjects_stages ss ON s.subject_id = ss.subject_id
+                WHERE ss.stage_id = ? AND s.is_active = 1 AND ss.is_active = 1
+                ORDER BY s.subject_name
+            """, (stage_id,))
+            
+            rows = cursor.fetchall()
+            
+            return [dict(row) for row in rows]
+            
+    except Exception as e:
+        logger.error(f"❌ خطأ في جلب مواد المرحلة: {e}")
+        return []
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("💾 دوال قاعدة البيانات - اختبار")
