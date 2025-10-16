@@ -200,18 +200,44 @@ def handle_start(message: types.Message):
         
         if user_type == 'owner':
             welcome_message = Config.Messages.WELCOME_OWNER
+            # إنشاء Inline Keyboard للمالك
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                types.InlineKeyboardButton("➕ إنشاء شعبة", callback_data="owner_create_section"),
+                types.InlineKeyboardButton("📋 عرض الشعب", callback_data="owner_list_sections")
+            )
+            markup.add(
+                types.InlineKeyboardButton("📊 الإحصائيات", callback_data="owner_statistics"),
+                types.InlineKeyboardButton("⚙️ الإعدادات", callback_data="owner_settings")
+            )
         elif user_type == 'admin':
             welcome_message = Config.Messages.WELCOME_ADMIN
+            # إنشاء Inline Keyboard للأدمن
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                types.InlineKeyboardButton("➕ نشر واجب", callback_data="admin_create_assignment"),
+                types.InlineKeyboardButton("📝 الواجبات", callback_data="admin_list_assignments")
+            )
+            markup.add(
+                types.InlineKeyboardButton("👥 إدارة الطلاب", callback_data="admin_manage_students"),
+                types.InlineKeyboardButton("⏳ الطلبات المعلقة", callback_data="admin_pending_requests")
+            )
         elif user_type == 'student':
             welcome_message = Config.Messages.WELCOME_STUDENT
+            # إنشاء Inline Keyboard للطالب
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                types.InlineKeyboardButton("📚 واجباتي", callback_data="student_my_assignments"),
+                types.InlineKeyboardButton("ℹ️ معلومات الشعبة", callback_data="student_section_info")
+            )
         else:
             welcome_message = Config.Messages.WELCOME_NEW_USER
+            markup = None
         
-        keyboard = create_main_keyboard(user_type)
         bot.send_message(
             message.chat.id,
             welcome_message,
-            reply_markup=keyboard
+            reply_markup=markup
         )
         
     except Exception as e:
@@ -237,6 +263,7 @@ def handle_help(message: types.Message):
 📚 الأوامر المتاحة:
 /start - بدء البوت
 /help - عرض هذه المساعدة
+/myid - عرض معرف تلغرام الخاص بك
 /cancel - إلغاء العملية الحالية
 
 """
@@ -280,6 +307,40 @@ def handle_help(message: types.Message):
         
     except Exception as e:
         logger.error(f"❌ خطأ في معالجة /help: {e}")
+
+
+@bot.message_handler(commands=['myid'])
+def handle_myid(message: types.Message):
+    """معالج أمر /myid - عرض معرف تلغرام للمستخدم"""
+    try:
+        user_info = get_user_info(message)
+        telegram_id = user_info['telegram_id']
+        username = user_info['username']
+        
+        logger.info(f"📩 أمر /myid من المستخدم: {telegram_id}")
+        
+        myid_text = f"""
+🆔 معلومات حسابك:
+
+👤 الاسم: {message.from_user.first_name or 'غير متوفر'}
+🔢 معرف تلغرام: `{telegram_id}`
+📱 Username: @{username if username else 'غير متوفر'}
+
+💡 يمكنك نسخ المعرف بالضغط عليه
+"""
+        
+        bot.send_message(
+            message.chat.id,
+            myid_text,
+            parse_mode='Markdown'
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في معالجة /myid: {e}")
+        bot.send_message(
+            message.chat.id,
+            Config.Messages.ERROR_GENERAL
+        )
 
 
 @bot.message_handler(commands=['cancel'])
@@ -571,18 +632,24 @@ def handle_create_section_button(message: types.Message):
             bot.send_message(message.chat.id, "❌ لا توجد مراحل دراسية")
             return
         
-        # إنشاء أزرار المراحل
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        # إنشاء أزرار المراحل Inline
+        markup = types.InlineKeyboardMarkup(row_width=1)
         for level in levels:
-            markup.add(types.KeyboardButton(level['level_name']))
-        markup.add(types.KeyboardButton('❌ إلغاء'))
+            markup.add(types.InlineKeyboardButton(
+                level['level_name'],
+                callback_data=f"create_sec_level_{level['level_id']}"
+            ))
+        markup.add(types.InlineKeyboardButton("❌ إلغاء", callback_data="create_sec_cancel"))
         
         bot.send_message(
             message.chat.id,
-            "📚 اختر المرحلة الدراسية:",
-            reply_markup=markup
+            "📚 **إنشاء شعبة جديدة**\n\n"
+            "الخطوة 1️⃣: اختر المرحلة الدراسية:",
+            reply_markup=markup,
+            parse_mode='Markdown'
         )
         
+        # حفظ بداية العملية
         bot.set_state(
             message.from_user.id,
             BotStates.create_section_level,
@@ -592,6 +659,608 @@ def handle_create_section_button(message: types.Message):
     except Exception as e:
         logger.error(f"❌ خطأ في معالجة زر إنشاء شعبة: {e}")
         bot.send_message(message.chat.id, Config.Messages.ERROR_GENERAL)
+
+
+# ==================== معالجات خطوات إنشاء الشعبة (Callback Handlers) ====================
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('create_sec_level_'))
+def handle_section_level_selection(call: types.CallbackQuery):
+    """معالج اختيار المرحلة الدراسية - الخطوة 1"""
+    try:
+        telegram_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # استخراج level_id
+        level_id = int(call.data.split('_')[-1])
+        
+        # الحصول على معلومات المرحلة
+        levels = get_academic_levels()
+        selected_level = None
+        for level in levels:
+            if level['level_id'] == level_id:
+                selected_level = level
+                break
+        
+        if not selected_level:
+            bot.answer_callback_query(call.id, "❌ خطأ في اختيار المرحلة", show_alert=True)
+            return
+        
+        logger.info(f"📝 المستخدم {telegram_id} اختار المرحلة: {selected_level['level_name']}")
+        
+        # حفظ البيانات
+        with bot.retrieve_data(telegram_id, chat_id) as data:
+            data['level_id'] = level_id
+            data['level_name'] = selected_level['level_name']
+        
+        # إنشاء أزرار نوع الدراسة Inline
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.row(
+            types.InlineKeyboardButton("🌅 صباحي", callback_data="create_sec_type_صباحي"),
+            types.InlineKeyboardButton("🌙 مسائي", callback_data="create_sec_type_مسائي")
+        )
+        markup.add(types.InlineKeyboardButton("❌ إلغاء", callback_data="create_sec_cancel"))
+        
+        # تعديل الرسالة
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            text=f"📚 **إنشاء شعبة جديدة**\n\n"
+                 f"✅ المرحلة: {selected_level['level_name']}\n\n"
+                 f"الخطوة 2️⃣: اختر نوع الدراسة:",
+            reply_markup=markup,
+            parse_mode='Markdown'
+        )
+        
+        bot.answer_callback_query(call.id, f"✅ تم اختيار {selected_level['level_name']}")
+        bot.set_state(telegram_id, BotStates.create_section_type, chat_id)
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في معالجة اختيار المرحلة: {e}")
+        bot.answer_callback_query(call.id, "❌ حدث خطأ", show_alert=True)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('create_sec_type_'))
+def handle_section_type_selection(call: types.CallbackQuery):
+    """معالج اختيار نوع الدراسة - الخطوة 2"""
+    try:
+        telegram_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # استخراج نوع الدراسة
+        study_type = call.data.split('_')[-1]
+        
+        if study_type not in Config.STUDY_TYPES:
+            bot.answer_callback_query(call.id, "❌ خطأ في اختيار نوع الدراسة", show_alert=True)
+            return
+        
+        logger.info(f"📝 المستخدم {telegram_id} اختار نوع الدراسة: {study_type}")
+        
+        # حفظ البيانات
+        with bot.retrieve_data(telegram_id, chat_id) as data:
+            data['study_type'] = study_type
+            level_name = data.get('level_name')
+        
+        # إنشاء أزرار الشعبة Inline
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.row(
+            types.InlineKeyboardButton("🅰️ شعبة A", callback_data="create_sec_div_A"),
+            types.InlineKeyboardButton("🅱️ شعبة B", callback_data="create_sec_div_B")
+        )
+        markup.add(types.InlineKeyboardButton("❌ إلغاء", callback_data="create_sec_cancel"))
+        
+        # تعديل الرسالة
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            text=f"📚 **إنشاء شعبة جديدة**\n\n"
+                 f"✅ المرحلة: {level_name}\n"
+                 f"✅ نوع الدراسة: {study_type}\n\n"
+                 f"الخطوة 3️⃣: اختر الشعبة:",
+            reply_markup=markup,
+            parse_mode='Markdown'
+        )
+        
+        bot.answer_callback_query(call.id, f"✅ تم اختيار {study_type}")
+        bot.set_state(telegram_id, BotStates.create_section_division, chat_id)
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في معالجة اختيار نوع الدراسة: {e}")
+        bot.answer_callback_query(call.id, "❌ حدث خطأ", show_alert=True)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('create_sec_div_'))
+def handle_section_division_selection(call: types.CallbackQuery):
+    """معالج اختيار الشعبة (A/B) - الخطوة 3"""
+    try:
+        telegram_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # استخراج الشعبة
+        division = call.data.split('_')[-1]
+        
+        if division not in Config.DIVISIONS:
+            bot.answer_callback_query(call.id, "❌ خطأ في اختيار الشعبة", show_alert=True)
+            return
+        
+        logger.info(f"📝 المستخدم {telegram_id} اختار الشعبة: {division}")
+        
+        # حفظ البيانات
+        with bot.retrieve_data(telegram_id, chat_id) as data:
+            data['division'] = division
+            level_name = data.get('level_name')
+            study_type = data.get('study_type')
+        
+        # تعديل الرسالة لطلب معرف الأدمن
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            text=f"📚 **إنشاء شعبة جديدة**\n\n"
+                 f"✅ المرحلة: {level_name}\n"
+                 f"✅ نوع الدراسة: {study_type}\n"
+                 f"✅ الشعبة: {division}\n\n"
+                 f"الخطوة 4️⃣: أدخل معرف تلغرام للأدمن\n\n"
+                 f"💡 للحصول على المعرف:\n"
+                 f"• أرسل /myid في هذا البوت\n"
+                 f"• أو أرسل /start لـ @userinfobot\n\n"
+                 f"📝 أرسل المعرف الآن:",
+            parse_mode='Markdown'
+        )
+        
+        bot.answer_callback_query(call.id, f"✅ تم اختيار شعبة {division}")
+        bot.set_state(telegram_id, BotStates.create_section_admin, chat_id)
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في معالجة اختيار الشعبة: {e}")
+        bot.answer_callback_query(call.id, "❌ حدث خطأ", show_alert=True)
+
+
+@bot.message_handler(state=BotStates.create_section_admin)
+def handle_section_admin_input(message: types.Message):
+    """معالج إدخال معرف الأدمن - الخطوة 4"""
+    try:
+        telegram_id = message.from_user.id
+        chat_id = message.chat.id
+        admin_input = message.text.strip()
+        
+        logger.info(f"📝 المستخدم {telegram_id} أدخل معرف الأدمن: {admin_input}")
+        
+        # معالجة الإلغاء
+        if admin_input == '❌ إلغاء':
+            bot.delete_state(message.from_user.id, chat_id)
+            user = UserDatabase.get_user(telegram_id)
+            keyboard = create_main_keyboard(user['user_type'])
+            bot.send_message(
+                chat_id,
+                "❌ تم إلغاء عملية إنشاء الشعبة",
+                reply_markup=keyboard
+            )
+            logger.info(f"🚫 المستخدم {telegram_id} ألغى عملية إنشاء الشعبة")
+            return
+        
+        # التحقق من أن المدخل رقم صحيح
+        if not admin_input.isdigit():
+            bot.send_message(
+                chat_id,
+                "❌ معرف تلغرام يجب أن يكون رقماً صحيحاً\n\n"
+                "الرجاء إدخال معرف تلغرام صحيح:"
+            )
+            return
+        
+        admin_telegram_id = int(admin_input)
+        
+        # التحقق من أن المعرف صحيح
+        is_valid, error = Validator.validate_telegram_id(admin_telegram_id)
+        if not is_valid:
+            bot.send_message(
+                chat_id,
+                f"❌ {error}\n\nالرجاء إدخال معرف تلغرام صحيح:"
+            )
+            return
+        
+        # التحقق من أن المعرف ليس معرف المالك نفسه
+        if admin_telegram_id == telegram_id:
+            bot.send_message(
+                chat_id,
+                "❌ لا يمكنك تعيين نفسك كأدمن\n\n"
+                "الرجاء إدخال معرف أدمن آخر:"
+            )
+            return
+        
+        # التحقق من وجود الأدمن في قاعدة البيانات
+        admin_user = UserDatabase.get_user(admin_telegram_id)
+        
+        admin_name = "أدمن جديد"
+        if admin_user:
+            admin_name = admin_user['full_name']
+            logger.info(f"✅ الأدمن موجود في قاعدة البيانات: {admin_name}")
+        else:
+            # إنشاء حساب للأدمن تلقائياً
+            success, msg = UserDatabase.create_user(
+                telegram_id=admin_telegram_id,
+                full_name=f"Admin_{admin_telegram_id}",
+                user_type='admin'
+            )
+            
+            if success:
+                admin_name = f"Admin_{admin_telegram_id}"
+                logger.info(f"✅ تم إنشاء حساب أدمن جديد: {admin_name}")
+            else:
+                bot.send_message(
+                    chat_id,
+                    f"❌ خطأ في إنشاء حساب الأدمن: {msg}\n\n"
+                    "الرجاء إدخال معرف آخر أو المحاولة لاحقاً:"
+                )
+                return
+        
+        # حفظ معرف الأدمن
+        with bot.retrieve_data(message.from_user.id, chat_id) as data:
+            data['admin_telegram_id'] = admin_telegram_id
+            data['admin_name'] = admin_name
+        
+        logger.info(f"✅ تم حفظ معرف الأدمن: {admin_telegram_id}")
+        
+        # جلب جميع البيانات لعرض الملخص
+        with bot.retrieve_data(message.from_user.id, chat_id) as data:
+            level_name = data.get('level_name')
+            study_type = data.get('study_type')
+            division = data.get('division')
+        
+        # عرض ملخص الشعبة
+        summary = f"""
+📋 ملخص الشعبة الجديدة:
+
+📚 المرحلة: {level_name}
+📅 نوع الدراسة: {study_type}
+🔤 الشعبة: {division}
+👨‍💼 الأدمن: {admin_name}
+🆔 معرف الأدمن: {admin_telegram_id}
+
+⚠️ تأكد من صحة البيانات قبل الإنشاء
+"""
+        
+        # إنشاء أزرار التأكيد
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton(
+                "✅ تأكيد الإنشاء",
+                callback_data="confirm_create_section"
+            ),
+            types.InlineKeyboardButton(
+                "❌ إلغاء",
+                callback_data="cancel_create_section"
+            )
+        )
+        
+        # إزالة أزرار الرد
+        remove_keyboard = types.ReplyKeyboardRemove()
+        
+        bot.send_message(
+            chat_id,
+            summary,
+            reply_markup=remove_keyboard
+        )
+        
+        bot.send_message(
+            chat_id,
+            "اضغط على أحد الأزرار:",
+            reply_markup=markup
+        )
+        
+        logger.info(f"📋 تم عرض ملخص الشعبة للمستخدم {telegram_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في معالجة إدخال معرف الأدمن: {e}")
+        bot.send_message(message.chat.id, Config.Messages.ERROR_GENERAL)
+        bot.delete_state(message.from_user.id, message.chat.id)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == 'confirm_create_section')
+def handle_confirm_create_section(call: types.CallbackQuery):
+    """معالج تأكيد إنشاء الشعبة - الخطوة 5"""
+    try:
+        telegram_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        logger.info(f"✅ المستخدم {telegram_id} أكد إنشاء الشعبة")
+        
+        # جلب البيانات المحفوظة
+        with bot.retrieve_data(telegram_id, chat_id) as data:
+            level_id = data.get('level_id')
+            study_type = data.get('study_type')
+            division = data.get('division')
+            admin_telegram_id = data.get('admin_telegram_id')
+            level_name = data.get('level_name')
+        
+        # التحقق من وجود جميع البيانات
+        if not all([level_id, study_type, division, admin_telegram_id]):
+            bot.answer_callback_query(
+                call.id,
+                "❌ بيانات ناقصة! الرجاء البدء من جديد",
+                show_alert=True
+            )
+            bot.delete_state(telegram_id, chat_id)
+            return
+        
+        # رسالة انتظار
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            text="⏳ جارِ إنشاء الشعبة..."
+        )
+        
+        # إنشاء الشعبة
+        success, message_text, section_info = SectionDatabase.create_section(
+            level_id=level_id,
+            study_type=study_type,
+            division=division,
+            admin_telegram_id=admin_telegram_id,
+            owner_id=telegram_id
+        )
+        
+        if success:
+            logger.info(f"✅ تم إنشاء الشعبة بنجاح: {section_info.get('section_name')}")
+            
+            # رسالة النجاح
+            success_message = f"""
+✅ تم إنشاء الشعبة بنجاح!
+
+🏷️ الاسم: {section_info['section_name']}
+🔗 رابط التسجيل:
+{section_info['join_link']}
+
+📋 شارك هذا الرابط مع الطلاب للتسجيل في الشعبة!
+
+💡 يمكنك عرض جميع الشعب من زر "📋 عرض الشعب"
+"""
+            
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=call.message.message_id,
+                text=success_message
+            )
+            
+            # إرسال إشعار للأدمن
+            try:
+                admin_notification = f"""
+🎉 مبروك! تم تعيينك كأدمن لشعبة جديدة
+
+🏷️ الشعبة: {section_info['section_name']}
+👑 تم التعيين بواسطة: المالك
+
+📋 يمكنك الآن:
+• إنشاء واجبات جديدة
+• الموافقة على طلبات التسجيل
+• إدارة الطلاب
+
+🚀 ابدأ بإرسال /start للبوت
+"""
+                bot.send_message(admin_telegram_id, admin_notification)
+                logger.info(f"✅ تم إرسال إشعار للأدمن: {admin_telegram_id}")
+            except Exception as e:
+                logger.error(f"❌ خطأ في إرسال إشعار للأدمن: {e}")
+            
+            # إعادة لوحة المفاتيح الرئيسية
+            user = UserDatabase.get_user(telegram_id)
+            keyboard = create_main_keyboard(user['user_type'])
+            bot.send_message(
+                chat_id,
+                "يمكنك الآن إدارة الشعب:",
+                reply_markup=keyboard
+            )
+            
+            bot.answer_callback_query(call.id, "✅ تم إنشاء الشعبة بنجاح!")
+            
+        else:
+            logger.error(f"❌ فشل إنشاء الشعبة: {message_text}")
+            
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=call.message.message_id,
+                text=f"❌ فشل إنشاء الشعبة:\n\n{message_text}"
+            )
+            
+            # إعادة لوحة المفاتيح الرئيسية
+            user = UserDatabase.get_user(telegram_id)
+            keyboard = create_main_keyboard(user['user_type'])
+            bot.send_message(
+                chat_id,
+                "يمكنك المحاولة مرة أخرى:",
+                reply_markup=keyboard
+            )
+            
+            bot.answer_callback_query(
+                call.id,
+                f"❌ فشل الإنشاء: {message_text}",
+                show_alert=True
+            )
+        
+        # حذف الـ state
+        bot.delete_state(telegram_id, chat_id)
+        logger.info(f"🔄 تم حذف الـ state للمستخدم {telegram_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في تأكيد إنشاء الشعبة: {e}")
+        bot.answer_callback_query(
+            call.id,
+            Config.Messages.ERROR_GENERAL,
+            show_alert=True
+        )
+        bot.delete_state(call.from_user.id, call.message.chat.id)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == 'create_sec_cancel')
+def handle_cancel_create_section(call: types.CallbackQuery):
+    """معالج إلغاء إنشاء الشعبة من الـ callback"""
+    try:
+        telegram_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        logger.info(f"🚫 المستخدم {telegram_id} ألغى إنشاء الشعبة")
+        
+        # حذف الـ state
+        bot.delete_state(telegram_id, chat_id)
+        
+        # تحديث الرسالة
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            text="❌ **تم إلغاء عملية إنشاء الشعبة**",
+            parse_mode='Markdown'
+        )
+        
+        bot.answer_callback_query(call.id, "✅ تم الإلغاء")
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في إلغاء إنشاء الشعبة: {e}")
+        bot.answer_callback_query(
+            call.id,
+            Config.Messages.ERROR_GENERAL,
+            show_alert=True
+        )
+
+
+# ==================== معالجات أزرار القائمة الرئيسية ====================
+
+@bot.callback_query_handler(func=lambda call: call.data == 'owner_create_section')
+def handle_owner_create_section_inline(call: types.CallbackQuery):
+    """معالج زر إنشاء شعبة من Inline"""
+    try:
+        telegram_id = call.from_user.id
+        
+        # التحقق من الصلاحية
+        has_permission, error = check_permission(telegram_id, 'owner')
+        
+        if not has_permission:
+            bot.answer_callback_query(call.id, f"❌ {error}", show_alert=True)
+            return
+        
+        # بدء عملية إنشاء الشعبة
+        levels = get_academic_levels()
+        
+        if not levels:
+            bot.answer_callback_query(call.id, "❌ لا توجد مراحل دراسية", show_alert=True)
+            return
+        
+        # إنشاء أزرار المراحل Inline
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        for level in levels:
+            markup.add(types.InlineKeyboardButton(
+                level['level_name'],
+                callback_data=f"create_sec_level_{level['level_id']}"
+            ))
+        markup.add(types.InlineKeyboardButton("❌ إلغاء", callback_data="create_sec_cancel"))
+        
+        bot.send_message(
+            call.message.chat.id,
+            "📚 **إنشاء شعبة جديدة**\n\n"
+            "الخطوة 1️⃣: اختر المرحلة الدراسية:",
+            reply_markup=markup,
+            parse_mode='Markdown'
+        )
+        
+        # حفظ بداية العملية
+        bot.set_state(
+            telegram_id,
+            BotStates.create_section_level,
+            call.message.chat.id
+        )
+        
+        bot.answer_callback_query(call.id)
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في معالجة زر إنشاء شعبة: {e}")
+        bot.answer_callback_query(call.id, Config.Messages.ERROR_GENERAL, show_alert=True)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == 'owner_list_sections')
+def handle_owner_list_sections_inline(call: types.CallbackQuery):
+    """معالج زر عرض الشعب من Inline"""
+    try:
+        telegram_id = call.from_user.id
+        
+        # التحقق من الصلاحية
+        user = UserDatabase.get_user(telegram_id)
+        
+        if not user:
+            bot.answer_callback_query(call.id, Config.Messages.ERROR_NO_PERMISSION, show_alert=True)
+            return
+        
+        sections = []
+        
+        if user['user_type'] == 'owner':
+            sections = SectionDatabase.get_all_sections()
+        elif user['user_type'] == 'admin':
+            sections = SectionDatabase.get_admin_sections(telegram_id)
+        
+        if not sections:
+            bot.answer_callback_query(call.id, "لا توجد شعب", show_alert=True)
+            return
+        
+        message_text = "📋 قائمة الشعب:\n\n"
+        
+        for section in sections:
+            message_text += f"🏷️ {section['section_name']}\n"
+            
+            if 'admin_name' in section and section['admin_name']:
+                message_text += f"👨‍💼 الأدمن: {section['admin_name']}\n"
+            
+            message_text += f"🔗 رابط التسجيل:\n{get_bot_link(section['join_code'])}\n"
+            message_text += "─" * 30 + "\n\n"
+        
+        send_long_message(call.message.chat.id, message_text)
+        bot.answer_callback_query(call.id)
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في معالجة زر عرض الشعب: {e}")
+        bot.answer_callback_query(call.id, Config.Messages.ERROR_GENERAL, show_alert=True)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == 'owner_statistics')
+def handle_owner_statistics_inline(call: types.CallbackQuery):
+    """معالج زر الإحصائيات من Inline"""
+    bot.answer_callback_query(call.id, "⚠️ هذه الميزة قيد التطوير", show_alert=True)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == 'owner_settings')
+def handle_owner_settings_inline(call: types.CallbackQuery):
+    """معالج زر الإعدادات من Inline"""
+    bot.answer_callback_query(call.id, "⚠️ هذه الميزة قيد التطوير", show_alert=True)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == 'admin_create_assignment')
+def handle_admin_create_assignment_inline(call: types.CallbackQuery):
+    """معالج زر نشر واجب من Inline"""
+    bot.answer_callback_query(call.id, "⚠️ هذه الميزة قيد التطوير", show_alert=True)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == 'admin_list_assignments')
+def handle_admin_list_assignments_inline(call: types.CallbackQuery):
+    """معالج زر الواجبات من Inline"""
+    bot.answer_callback_query(call.id, "⚠️ هذه الميزة قيد التطوير", show_alert=True)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == 'admin_manage_students')
+def handle_admin_manage_students_inline(call: types.CallbackQuery):
+    """معالج زر إدارة الطلاب من Inline"""
+    bot.answer_callback_query(call.id, "⚠️ هذه الميزة قيد التطوير", show_alert=True)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == 'admin_pending_requests')
+def handle_admin_pending_requests_inline(call: types.CallbackQuery):
+    """معالج زر الطلبات المعلقة من Inline"""
+    bot.answer_callback_query(call.id, "⚠️ هذه الميزة قيد التطوير", show_alert=True)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == 'student_my_assignments')
+def handle_student_my_assignments_inline(call: types.CallbackQuery):
+    """معالج زر واجباتي من Inline"""
+    bot.answer_callback_query(call.id, "⚠️ هذه الميزة قيد التطوير", show_alert=True)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == 'student_section_info')
+def handle_student_section_info_inline(call: types.CallbackQuery):
+    """معالج زر معلومات الشعبة من Inline"""
+    bot.answer_callback_query(call.id, "⚠️ هذه الميزة قيد التطوير", show_alert=True)
 
 
 @bot.message_handler(func=lambda message: message.text == '📋 عرض الشعب')
